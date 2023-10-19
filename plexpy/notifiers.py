@@ -58,6 +58,7 @@ except ImportError:
 
 import gntp.notifier
 import facebook
+import mautrix
 import twitter
 
 import plexpy
@@ -109,7 +110,8 @@ AGENT_IDS = {'growl': 0,
              'plexmobileapp': 26,
              'lunasea': 27,
              'microsoftteams': 28,
-             'gotify': 29
+             'gotify': 29,
+             'matrix': 30
              }
 
 DEFAULT_CUSTOM_CONDITIONS = [{'parameter': '', 'operator': '', 'value': [], 'type': None}]
@@ -197,6 +199,12 @@ def available_notification_agents():
                'name': 'lunasea',
                'id': AGENT_IDS['lunasea'],
                'class': LUNASEA,
+               'action_types': ('all',)
+               },
+              {'label': 'MATRIX',
+               'name': 'matrix',
+               'id': AGENT_IDS['matrix'],
+               'class': MATRIX,
                'action_types': ('all',)
                },
               {'label': 'Microsoft Teams',
@@ -748,7 +756,7 @@ def validate_conditions(custom_conditions):
 
         if parameter:
             parameter_type = common.NOTIFICATION_PARAMETERS_TYPES.get(parameter)
-        
+
             if not parameter_type:
                 logger.error("Tautulli Notifiers :: Invalid parameter '%s' in custom condition: %s" % (parameter, condition))
                 return False
@@ -771,7 +779,7 @@ def validate_conditions(custom_conditions):
                 if not isinstance(value, (str, int, float)):
                     logger.error("Tautulli Notifiers :: Invalid value '%s' for parameter '%s' in custom condition: %s" % (value, parameter, condition))
                     return False
-            
+
             validated_condition['value'] = values
 
         validated_conditions.append(validated_condition)
@@ -922,7 +930,7 @@ class PrettyMetadata(object):
             poster_content = result[0]
             poster_filename = 'poster_{}.png'.format(self.parameters['rating_key'])
             return (poster_filename, poster_content, 'image/png')
-        
+
         logger.error("Tautulli Notifiers :: Unable to retrieve image for notification.")
 
 
@@ -2239,6 +2247,133 @@ class LUNASEA(Notifier):
                           'name': 'lunasea_incl_subject',
                           'description': 'Include the subject line with the notifications.',
                           'input_type': 'checkbox'
+                          }
+                         ]
+
+        return config_option
+
+class MATRIX(Notifier):
+    """
+    Matrix Notifications
+    """
+    NAME = 'Matrix'
+    _DEFAULT_CONFIG = {'homeserver_url': '',
+                       'matrix_id': '',
+                       'password': '',
+                       'device_id': 'tautulli',
+                       'room_id': ''
+                       }
+
+    def agent_notify(self, subject='', body='', action='', **kwargs):
+        # prepend Tautulli to user agent before instantiating Mautrix's client
+        mautrix.api.HTTPAPI.default_ua = f"Tautulli/{common.RELEASE} {mautrix.api.HTTPAPI.default_ua}"
+        client = mautrix.client.Client(mxid=self.config['matrix_id'], device_id=self.config['device_id'], base_url=self.config['base_url'])
+
+        client.login(password=self.config['password'], device_name=self.config['device_id'], device_id=self.config['device_id'])
+
+        if self.config['incl_subject']:
+            text = subject + '\r\n' + body
+        else:
+            text = body
+
+        return client.send_notice(self.config['room_id'], text=text)
+
+#        data = {'text': text}
+#        if self.config['channel'] and self.config['channel'].startswith('#'):
+#            data['channel'] = self.config['channel']
+#        if self.config['username']:
+#            data['username'] = self.config['username']
+#        if self.config['icon_emoji']:
+#            if urlparse(self.config['icon_emoji']).scheme == '':
+#                data['icon_emoji'] = self.config['icon_emoji']
+#            else:
+#                data['icon_url'] = self.config['icon_emoji']
+#
+#        if self.config['incl_card'] and kwargs.get('parameters', {}).get('media_type'):
+#            # Grab formatted metadata
+#            pretty_metadata = PrettyMetadata(kwargs['parameters'])
+#
+#            if pretty_metadata.media_type == 'movie':
+#                provider = self.config['movie_provider']
+#            elif pretty_metadata.media_type in ('show', 'season', 'episode'):
+#                provider = self.config['tv_provider']
+#            elif pretty_metadata.media_type in ('artist', 'album', 'track'):
+#                provider = self.config['music_provider']
+#            else:
+#                provider = None
+#
+#            poster_url = pretty_metadata.get_poster_url()
+#            provider_name = pretty_metadata.get_provider_name(provider)
+#            provider_link = pretty_metadata.get_provider_link(provider)
+#            title = pretty_metadata.get_title('\u00B7')
+#            description = pretty_metadata.get_description()
+#            plex_url = pretty_metadata.get_plex_url()
+#
+#            # Build Slack post attachment
+#            attachment = {'fallback': 'Image for %s' % title,
+#                          'title': title
+#                          }
+#
+#            if self.config['color'] and re.match(r'^#(?:[0-9a-fA-F]{3}){1,2}$', self.config['color']):
+#                attachment['color'] = self.config['color']
+#
+#            if self.config['incl_thumbnail']:
+#                attachment['thumb_url'] = poster_url
+#            else:
+#                attachment['image_url'] = poster_url
+#
+#            if self.config['incl_description']:
+#                attachment['text'] = description
+#
+#            fields = []
+#            if provider_link:
+#                attachment['title_link'] = provider_link
+#                fields.append({'title': 'View Details',
+#                               'value': '<%s|%s>' % (provider_link, provider_name),
+#                               'short': True})
+#            if self.config['incl_pmslink']:
+#                fields.append({'title': 'View Details',
+#                               'value': '<%s|%s>' % (plex_url, 'Plex Web'),
+#                               'short': True})
+#            if fields:
+#                attachment['fields'] = fields
+#
+#            data['attachments'] = [attachment]
+#
+#        headers = {'Content-type': 'application/json'}
+#
+#        return self.make_request(self.config['hook'], headers=headers, json=data)
+
+    def _return_config_options(self):
+        config_option = [{'label': 'Homeserver URL',
+                          'value': self.config['homeserver_url'],
+                          'name': 'homeserver_url',
+                          'description': 'Your homeserver\'s URL',
+                          'input_type': 'text'
+                          },
+                         {'label': 'Matrix ID',
+                          'value': self.config['matrix_id'],
+                          'name': 'matrix_id',
+                          'description': 'The Matrix ID of the account to use for sending messages',
+                          'input_type': 'text'
+                          },
+                         {'label': 'Password',
+                          'value': self.config['password'],
+                          'name': 'pasword',
+                          'description': 'The user\'s password',
+                          'input_type': 'token'
+                          },
+                         {'label': 'Device ID',
+                          'value': self.config['device_id'],
+                          'name': 'device_id',
+                          'description': 'The Device ID to use for Tautulli\'s sessions',
+                          'input_type': 'text'
+                          },
+                         {'label': 'Room ID',
+                          'value': self.config['room_id'],
+                          'description': 'The Matrix Room ID or alias to send messages to',
+                          'name': 'room_id',
+                          'input_type': 'text'
                           }
                          ]
 
